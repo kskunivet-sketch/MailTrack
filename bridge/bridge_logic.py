@@ -485,6 +485,8 @@ class BridgeLogic:
         if cached_attachments is None: cached_attachments = []
         cached_map = {a.get('fileName'): a for a in cached_attachments if isinstance(a, dict) and a.get('fileName')}
         try:
+            rs = None
+            child_rs = None
             try:
                 try:
                     query = f"SELECT [LAMPIRAN SURAT] FROM [{target_table}] WHERE [NO URUT] = {no_urut}"
@@ -504,44 +506,47 @@ class BridgeLogic:
                     rs = dao_db.OpenRecordset(query)
                     child_rs = rs.Fields("LAMPIRAN/ARSIP SURAT").Value
 
-            if not rs.EOF:
-                while not child_rs.EOF:
-                    fname = child_rs.Fields("FileName").Value
-                    smart_name = f"{conf['target_year']}_{target_table.split()[-2]}_{no_urut}_{fname}"
-                    
-                    if fname in cached_map:
-                        results.append(cached_map[fname])
-                    else:
-                        existing = self._check_drive_file(smart_name, conf['drive_folder_id'])
-                        if existing:
-                            results.append({
-                                'fileName': fname,
-                                'driveViewLink': f"https://drive.google.com/file/d/{existing['id']}/view?usp=sharing",
-                                'driveFileId': existing['id']
-                            })
-                        else:
-                            temp_dir = os.path.join(os.path.dirname(__file__), 'temp_att')
-                            if not os.path.exists(temp_dir): os.makedirs(temp_dir)
-                            path = os.path.join(temp_dir, smart_name)
-                            
-                            if os.path.exists(path):
-                                try: os.remove(path)
-                                except: pass
-                                
-                            child_rs.Fields("FileData").SaveToFile(path)
+            if rs and not rs.EOF and child_rs is not None:
+                # Check if child_rs is a Recordset (multi-value) or String
+                if hasattr(child_rs, 'EOF'):
+                    while not child_rs.EOF:
+                        fname = child_rs.Fields("FileName").Value
+                        smart_name = f"{conf['target_year']}_{target_table.split()[-2]}_{no_urut}_{fname}"
                         
-                            if os.path.exists(path):
-                                res = self._upload_to_drive(path, smart_name, conf['drive_folder_id'])
-                                if res:
-                                    results.append({
-                                        'fileName': fname,
-                                        'driveViewLink': res['link'],
-                                        'driveFileId': res['id']
-                                    })
-                                try: os.remove(path)
-                                except: pass
-                    child_rs.MoveNext()
-            rs.Close()
+                        if fname in cached_map:
+                            results.append(cached_map[fname])
+                        else:
+                            existing = self._check_drive_file(smart_name, conf['drive_folder_id']) or self._check_drive_file(fname, conf['drive_folder_id'])
+                            if existing:
+                                results.append({'fileName': fname, 'driveViewLink': f"https://drive.google.com/file/d/{existing['id']}/view?usp=sharing", 'driveFileId': existing['id']})
+                            else:
+                                temp_dir = os.path.join(os.path.dirname(__file__), 'temp_att')
+                                if not os.path.exists(temp_dir): os.makedirs(temp_dir)
+                                path = os.path.join(temp_dir, smart_name)
+                                if os.path.exists(path):
+                                    try: os.remove(path)
+                                    except: pass
+                                child_rs.Fields("FileData").SaveToFile(path)
+                                if os.path.exists(path):
+                                    res = self._upload_to_drive(path, smart_name, conf['drive_folder_id'])
+                                    if res:
+                                        results.append({'fileName': fname, 'driveViewLink': res['link'], 'driveFileId': res['id']})
+                                    try: os.remove(path)
+                                    except: pass
+                        child_rs.MoveNext()
+                else:
+                    # It's a plain string (like in Surat Keluar)
+                    fnames = [f.strip() for f in str(child_rs).split(';') if f.strip()]
+                    for fname in fnames:
+                        if fname in cached_map:
+                            results.append(cached_map[fname])
+                        else:
+                            # Try to find exactly by string name
+                            existing = self._check_drive_file(fname, conf['drive_folder_id'])
+                            if existing:
+                                results.append({'fileName': fname, 'driveViewLink': f"https://drive.google.com/file/d/{existing['id']}/view?usp=sharing", 'driveFileId': existing['id']})
+
+            if rs: rs.Close()
         except Exception as e: 
             pass
         return results
