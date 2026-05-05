@@ -1,0 +1,16 @@
+{
+    "installCommand": "npm install",
+    "buildCommand": "next build",
+    "devCommand": "next dev",
+    "framework": "nextjs",
+    "outputDirectory": ".next",
+    "functions": {
+        "app/api/**/*": {
+            "maxDuration": 15
+        }
+    },
+    "env": {
+        "POSTGRES_PRISMA_URL": "",
+        "POSTGRES_URL_NON_POOLING": ""
+    }
+}
