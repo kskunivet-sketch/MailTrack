@@ -353,8 +353,16 @@ class BridgeLogic:
             conn = pyodbc.connect(conn_str)
             cursor = conn.cursor()
         except Exception as e:
-            logging.error(f"ODBC Connect Failed: {e}")
-            raise
+            type_key = 'masuk' if 'MASUK' in conf.get('target_table_prefix', '') else 'keluar'
+            logging.error(f"Database not found for {type_key}: {e}")
+            if self.firestore_db:
+                try: 
+                    self.firestore_db.collection('config').document('system').set({
+                        f'lastError_{type_key}': str(e)[0:100],
+                        f'syncStatus_{type_key}': 'offline'
+                    }, merge=True)
+                except: pass
+            return None, None
 
         try:
             available_tables = [table.table_name for table in cursor.tables(tableType='TABLE')]
@@ -554,7 +562,8 @@ class BridgeLogic:
     def _check_drive_file(self, name, folder_id):
         if not self.drive_service: return None
         try:
-            q = f"name = '{name}' and trashed = false"
+            safe_name = name.replace("'", "\\'")
+            q = f"name contains '{safe_name}' and trashed = false"
             if folder_id: q += f" and '{folder_id}' in parents"
             res = self.drive_service.files().list(q=q, fields="files(id)").execute()
             files = res.get('files', [])

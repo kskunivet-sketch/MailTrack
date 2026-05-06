@@ -100,8 +100,8 @@ export async function fetchBackupData(type: AppType = 'masuk'): Promise<MailDocu
             downloadUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
         }
 
-        // 2. Fetch the JSON
-        const response = await fetch(downloadUrl);
+        // 2. Fetch the JSON via Proxy to bypass CORS
+        const response = await fetch('/api/proxy-drive?url=' + encodeURIComponent(downloadUrl));
         if (!response.ok) throw new Error("Failed to fetch backup file");
 
         const data = await response.json();
