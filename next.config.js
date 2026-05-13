@@ -19,8 +19,8 @@ const nextConfig = {
         },
     },
 
-    // 4. Webpack Specific: FS Fallback
-    webpack: (config, { isServer }) => {
+    // 4. Webpack Specific: FS Fallback + Watch Ignore
+    webpack: (config, { isServer, dev }) => {
         if (!isServer) {
             config.resolve.fallback = {
                 fs: false,
@@ -28,11 +28,26 @@ const nextConfig = {
                 os: false,
             };
         }
+        // Exclude directories from hot-reload watching.
+        // The bridge/ dir contains large JSON & log files that change every sync cycle,
+        // causing webpack to rebuild constantly → high RAM & CPU usage.
+        // NOTE: This only works with webpack (npm run dev --no-turbo).
+        //       Turbopack does NOT respect this config — hence the --no-turbo flag in package.json.
+        if (dev) {
+            config.watchOptions = {
+                ...config.watchOptions,
+                ignored: [
+                    '**/node_modules/**',
+                    '**/.git/**',
+                    '**/bridge/**',
+                    '**/.next/**',
+                ],
+            };
+        }
         return config;
     },
 
-    // 5. Silence Turbopack warning
-    turbopack: {},
+
 };
 
 module.exports = nextConfig;

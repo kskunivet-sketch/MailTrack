@@ -1,16 +1,20 @@
 {
-    "installCommand": "npm install",
-    "buildCommand": "next build",
-    "devCommand": "next dev",
     "framework": "nextjs",
-    "outputDirectory": ".next",
+    "buildCommand": "next build",
+    "installCommand": "npm install",
     "functions": {
         "app/api/**/*": {
             "maxDuration": 15
         }
     },
-    "env": {
-        "POSTGRES_PRISMA_URL": "",
-        "POSTGRES_URL_NON_POOLING": ""
-    }
+    "headers": [
+        {
+            "source": "/api/(.*)",
+            "headers": [
+                { "key": "X-Content-Type-Options", "value": "nosniff" },
+                { "key": "X-Frame-Options", "value": "DENY" },
+                { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
+            ]
+        }
+    ]
 }

@@ -12,7 +12,6 @@ if exist ".venv\Scripts\activate.bat" (
     exit /b 1
 )
 
-:: Run Python (GUI mode/pythonw) but WAIT for it to finish.
-:: 'start /wait "" pythonw ...' ensures the batch file waits, preventing restart loops.
-:: And 'pythonw' ensures no extra console window (besides the hidden parent one).
-start /wait "" pythonw bridge/bridge_tray.py
+:: Run Python bridge directly (no 'start' - keep as child process for watchdog tracking)
+pythonw bridge/bridge_tray.py
+

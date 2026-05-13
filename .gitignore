@@ -1,4 +1,4 @@
-﻿# Python
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -18,19 +18,27 @@ env/
 token.json
 credentials.json
 serviceAccountKey.json
-.env.secrets
 
-# Bridge Data & Logs
+# Bridge Data & Logs (contains local paths, passwords, and runtime data)
 bridge/sync_state.json
+bridge/sync_state_*.json
 bridge/sync_state.db
 bridge/latest_data.json
+bridge/latest_data_*.json
 bridge/config.json
+bridge/config_cache.json
+bridge/config_cache_v2.json
 bridge/bridge.log
 bridge/bridge_debug.log
+bridge/.env
+bridge/token.json
+bridge/credentials.json
+bridge/serviceAccountKey.json
 bridge/temp_attachments/
 bridge/temp_att/
 bridge/__pycache__/
 bridge/node_modules/
+bridge/tmp_*.txt
 sync_signal.txt
 
 # Log & Output Files
@@ -39,6 +47,16 @@ sync_signal.txt
 output*.txt
 stderr.txt
 log.txt
+
+# Temp & Debug Files
+tmp.txt
+tmp_tail.txt
+tmp_*.txt
+
+# Test Scripts (local-only utilities)
+test_*.py
+force_sync.py
+force_upload.py
 
 # Node.js / Next.js
 node_modules/

@@ -2,9 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase/config';
-import {
-    collection, query, orderBy, onSnapshot, limit
-} from 'firebase/firestore';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { useConfig } from '@/lib/hooks/useConfig';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -19,43 +16,39 @@ function AdminAuditContent() {
     const { user } = useAuth();
     const { config: configMasuk } = useConfig('masuk');
     const { config: configKeluar } = useConfig('keluar');
-    const [logs, setLogs] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
+    const [fileLogsLoading, setFileLogsLoading] = useState(true);
+    const [bridgeFileLogs, setBridgeFileLogs] = useState<string[]>([]);
 
-    // Auto-scroll logic
+    // Auto-scroll logic for local logs
     useEffect(() => {
         const container = document.getElementById('bridge-terminal');
         if (container) {
             container.scrollTop = container.scrollHeight;
         }
-    }, [logs]);
+    }, [bridgeFileLogs]);
 
     useEffect(() => {
-        if (!user) return;
-        console.log("Listening to audit_logs...");
-        const q = query(collection(db, 'audit_logs'), limit(100));
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            console.log("Audit Logs snapshot received, size:", snapshot.size);
-            const newLogs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        // Poll the local bridge logs API
+        const fetchLocalLogs = async () => {
+            try {
+                const res = await fetch('/api/bridge-logs');
+                if (res.ok) {
+                    const data = await res.json();
+                    setBridgeFileLogs(data.logs || []);
+                } else {
+                    throw new Error("Failed to fetch local API");
+                }
+            } catch (err: any) {
+                console.error("Local Logs error:", err);
+            } finally {
+                setFileLogsLoading(false);
+            }
+        };
 
-            // Safer sort
-            newLogs.sort((a: any, b: any) => {
-                const timeA = a.timestamp?.seconds || 0;
-                const timeB = b.timestamp?.seconds || 0;
-                return timeB - timeA;
-            });
-
-            setLogs(newLogs);
-            setLoading(false);
-            setError(null);
-        }, (err) => {
-            console.error("Audit Logs error:", err);
-            setError(err.message);
-            setLoading(false);
-        });
-        return () => unsubscribe();
-    }, [user]);
+        fetchLocalLogs();
+        const interval = setInterval(fetchLocalLogs, 3000);
+        return () => clearInterval(interval);
+    }, []);
 
     const showDiagnostic = (msg: string) => {
         let title = 'System Diagnostic';
@@ -111,7 +104,7 @@ function AdminAuditContent() {
             </div>
 
             {/* Dashboard Sensors */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
                 <div className="lg:col-span-1 space-y-6">
                     {/* Connection Status Card - Surat Masuk */}
                     <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl overflow-hidden border border-slate-200 dark:border-slate-800">
@@ -175,113 +168,36 @@ function AdminAuditContent() {
                 </div>
 
                 {/* Log Streamer */}
-                <div className="lg:col-span-2 bg-slate-900 rounded-2xl shadow-2xl border border-slate-800 overflow-hidden flex flex-col h-[520px]">
-                    <div className="px-5 py-3 bg-slate-800/80 border-b border-white/5 flex items-center justify-between">
-                        <div className="flex gap-1.5">
-                            <div className="w-3 h-3 rounded-full bg-red-500/50" />
-                            <div className="w-3 h-3 rounded-full bg-amber-500/50" />
-                            <div className="w-3 h-3 rounded-full bg-green-500/50" />
+                <div className="lg:col-span-2 relative min-h-[500px] lg:min-h-0">
+                    <div className="bg-slate-900 rounded-2xl shadow-2xl border border-slate-800 overflow-hidden flex flex-col h-full lg:absolute lg:inset-0 w-full">
+                        <div className="px-5 py-3 bg-slate-800/80 border-b border-white/5 flex items-center justify-between shrink-0">
+                            <div className="flex gap-1.5">
+                                <div className="w-3 h-3 rounded-full bg-red-500/50" />
+                                <div className="w-3 h-3 rounded-full bg-amber-500/50" />
+                                <div className="w-3 h-3 rounded-full bg-green-500/50" />
+                            </div>
+                            <span className="text-[10px] uppercase font-black text-slate-500 tracking-[0.2em]">Local Bridge Output</span>
                         </div>
-                        <span className="text-[10px] uppercase font-black text-slate-500 tracking-[0.2em]">Bridge Terminal Output</span>
-                    </div>
-                    <div id="bridge-terminal" className="flex-1 p-6 font-mono text-xs text-green-400/90 overflow-y-auto space-y-1 scrollbar-thin scrollbar-thumb-slate-700">
-                        {loading ? (
-                            <div className="h-full flex items-center justify-center text-slate-600 italic">Initializing stream...</div>
-                        ) : logs.length === 0 ? (
-                            <div className="h-full flex items-center justify-center text-slate-600 italic">No logs available in database.</div>
-                        ) : (
-                            [...logs].reverse().map((log, i) => (
-                                <div key={log.id} className="hover:bg-white/5 border-l-2 border-transparent hover:border-blue-500 pl-3 transition-colors">
-                                    <span className="text-slate-600 mr-4">{(i + 1).toString().padStart(3, '0')}</span>
-                                    <span className={log.level === 'error' ? 'text-red-400' : log.level === 'warning' ? 'text-amber-400' : 'text-green-400/90'}>
-                                        [{log.level ? log.level.toUpperCase() : 'INFO'}] {log.message}
-                                    </span>
-                                </div>
-                            ))
-                        )}
-                    </div>
-                </div>
-            </div>
-
-            {/* Event History Table */}
-            <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
-                <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/20">
-                    <div>
-                        <h2 className="text-xl font-bold text-slate-900 dark:text-white">Full Event History</h2>
-                        <p className="text-xs text-slate-500 mt-1">Real-time sensor data from the bridge engine</p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                        <button
-                            onClick={async () => {
-                                try {
-                                    const { getDocs, collection, query, limit } = await import('firebase/firestore');
-                                    const snap = await getDocs(query(collection(db, 'audit_logs'), limit(10)));
-                                    Swal.fire({
-                                        title: 'Data Probe',
-                                        text: `Found ${snap.size} documents in Firestore collection "audit_logs".`,
-                                        icon: 'info',
-                                        background: '#1e293b',
-                                        color: '#f8fafc'
-                                    });
-                                } catch (e: any) {
-                                    Swal.fire({ title: 'Probe Failed', text: e.message, icon: 'error' });
-                                }
-                            }}
-                            className="text-[10px] font-bold text-blue-500 hover:text-blue-600 uppercase tracking-widest bg-blue-500/10 px-3 py-1.5 rounded-lg transition-all"
-                        >
-                            Direct Data Probe
-                        </button>
-                        <span className="text-xs bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full font-bold text-slate-500">
-                            {logs.length} EVENTS TOTAL
-                        </span>
-                    </div>
-                </div>
-                <div className="overflow-x-auto overflow-y-auto h-[450px] scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-800">
-                    <table className="w-full text-left relative">
-                        <thead className="sticky top-0 z-10">
-                            <tr className="bg-slate-50 dark:bg-slate-800 text-[10px] uppercase font-bold text-slate-500 tracking-widest shadow-sm">
-                                <th className="px-6 py-4">Timestamp</th>
-                                <th className="px-6 py-4">Context</th>
-                                <th className="px-6 py-4">Message</th>
-                                <th className="px-6 py-4">Source</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                            {error ? (
-                                <tr>
-                                    <td colSpan={4} className="px-6 py-12 text-center text-red-500 font-medium">
-                                        <div className="flex flex-col items-center gap-2">
-                                            <svg className="w-8 h-8 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                                            <p>Snapshot Error: {error}</p>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ) : logs.length === 0 ? (
-                                <tr>
-                                    <td colSpan={4} className="px-6 py-12 text-center text-slate-500 italic">
-                                        No event history found in the database.
-                                    </td>
-                                </tr>
+                        <div id="bridge-terminal" className="flex-1 p-6 font-mono text-xs text-green-400/90 overflow-y-auto space-y-1 scrollbar-thin scrollbar-thumb-slate-700">
+                            {fileLogsLoading ? (
+                                <div className="h-full flex items-center justify-center text-slate-600 italic">Connecting to Local Engine...</div>
+                            ) : bridgeFileLogs.length === 0 ? (
+                                <div className="h-full flex items-center justify-center text-slate-600 italic">Local bridge logs empty.</div>
                             ) : (
-                                logs.map(log => (
-                                    <tr key={log.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
-                                        <td className="px-6 py-4 text-xs font-mono text-slate-400">
-                                            {log.timestamp && typeof log.timestamp.toDate === 'function'
-                                                ? log.timestamp.toDate().toLocaleString('id-ID')
-                                                : 'Pending...'}
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <span className={`px-2 py-1 rounded text-[10px] font-black uppercase ${log.level === 'error' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>
-                                                {log.level}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4 text-sm text-slate-700 dark:text-slate-300 font-medium">{log.message}</td>
-                                        <td className="px-6 py-4 text-xs text-slate-400 font-mono">{log.userName || 'SYSTEM_CORE'}</td>
-                                    </tr>
-                                ))
+                                bridgeFileLogs.map((logStr, i) => {
+                                    let colorClass = 'text-green-400/90';
+                                    if (logStr.includes('[ERROR]') || logStr.includes('[CRITICAL]')) colorClass = 'text-red-400';
+                                    else if (logStr.includes('[WARNING]')) colorClass = 'text-amber-400';
+                                    
+                                    return (
+                                        <div key={i} className="hover:bg-white/5 border-l-2 border-transparent hover:border-blue-500 pl-3 transition-colors">
+                                            <span className={colorClass}>{logStr}</span>
+                                        </div>
+                                    );
+                                })
                             )}
-                        </tbody>
-                    </table>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

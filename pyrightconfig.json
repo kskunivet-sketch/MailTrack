@@ -1,0 +1,10 @@
+{
+  "include": [
+    "."
+  ],
+  "extraPaths": [
+    "./bridge"
+  ],
+  "pythonVersion": "3.14",
+  "typeCheckingMode": "basic"
+}

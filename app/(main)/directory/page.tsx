@@ -553,14 +553,17 @@ export default function DirectoryPage() {
                                                 // Handle Attachments Column
                                                 if (column.match(/LAMPIRAN|ATTACHMENT|FILE/i)) {
                                                     const hasAtt = mail.attachments && mail.attachments.length > 0;
-                                                    // Priority: attachment_link field -> or first item in attachments array
-                                                    const attLink = mail.attachment_link || (hasAtt ? mail.attachments?.[0]?.driveViewLink : null);
+                                                    // Gunakan driveViewLink dari attachments[0] sebagai link utama.
+                                                    // attachment_link bisa berisi multi-URL dipisah koma (tidak valid sebagai href).
+                                                    const firstDriveLink = hasAtt
+                                                        ? mail.attachments[0]?.driveViewLink
+                                                        : (mail.attachment_link ? mail.attachment_link.split(', ')[0].trim() : null);
 
                                                     return (
                                                         <td key={column} className={`px-6 py-4 text-center ${getColumnClass(column)}`}>
-                                                            {attLink ? (
+                                                            {firstDriveLink ? (
                                                                 <a
-                                                                    href={attLink}
+                                                                    href={firstDriveLink}
                                                                     target="_blank"
                                                                     rel="noreferrer"
                                                                     onClick={(e) => e.stopPropagation()}

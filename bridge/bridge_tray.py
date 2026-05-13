@@ -160,8 +160,7 @@ class BridgeTrayApp:
 
 if __name__ == "__main__":
     if is_already_running():
-        logging.warning("MailTrackerPro Bridge is already running! (Mutex Locked)")
-        # Show alert if possible or just exit
+        logging.debug("Bridge instance already running (Mutex Locked). Exiting quietly.")
         sys.exit(0)
 
     # Pre-init bridge

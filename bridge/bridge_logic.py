@@ -388,6 +388,7 @@ class BridgeLogic:
             return
 
         stats = {"added": 0, "updated": 0, "skipped": 0}
+        seen_doc_ids = set()
         
         for row in rows:
             data = {}
@@ -406,7 +407,14 @@ class BridgeLogic:
                 try: real_year = int(date_val[:4])
                 except: pass
 
-            doc_id = f"{real_year}_{no_urut}"
+            raw_doc_id = f"{real_year}_{no_urut}"
+            doc_id = raw_doc_id
+            counter = 1
+            while doc_id in seen_doc_ids:
+                doc_id = f"{raw_doc_id}_{counter}"
+                counter += 1
+            seen_doc_ids.add(doc_id)
+            
             data['id'] = doc_id
             data['year'] = real_year
             data['target_year_config'] = int(conf['target_year'])
@@ -417,10 +425,41 @@ class BridgeLogic:
             attachments = []
             cached_atts = cached.get('attachments', []) if isinstance(cached.get('attachments'), list) else []
             
-            if dao_db:
-                try:
-                    attachments = self._extract_attachments(dao_db, target_table, no_urut, conf, cached_atts)
-                except Exception:
+            att_field_val = data.get('LAMPIRAN/ARSIP SURAT') or data.get('LAMPIRAN SURAT')
+            
+            # FAST PATH: Plain string attachments (Surat Keluar)
+            if t != 'masuk' and isinstance(att_field_val, str) and att_field_val != "[BINARY]":
+                fnames = [f.strip() for f in att_field_val.split(';') if f.strip() and f.strip().lower().endswith(('.pdf', '.jpg', '.png', '.doc', '.docx', '.xls', '.xlsx'))]
+                cached_map = {a.get('fileName'): a for a in cached_atts if isinstance(a, dict) and a.get('fileName')}
+                
+                for fname in fnames:
+                    if fname in cached_map:
+                        attachments.append(cached_map[fname])
+                    else:
+                        smart_name = f"{conf['target_year']}_{target_table.split()[-2]}_{no_urut}_{fname}"
+                        existing = self._check_drive_file(smart_name, conf['drive_folder_id']) or self._check_drive_file(fname, conf['drive_folder_id'])
+                        if existing:
+                            attachments.append({'fileName': fname, 'driveViewLink': f"https://drive.google.com/file/d/{existing['id']}/view?usp=sharing", 'driveFileId': existing['id']})
+                            
+            # DAO PATH: Access Attachments (Surat Masuk)
+            elif dao_db and (att_field_val == "[BINARY]" or (t == 'masuk' and att_field_val)):
+                requires_extract = (current_hash != cached.get('hash')) or (not cached.get('uploaded'))
+                
+                if isinstance(att_field_val, str) and att_field_val != "[BINARY]":
+                    fnames = [f.strip() for f in att_field_val.split(';') if f.strip() and f.strip().lower().endswith(('.pdf', '.jpg', '.png', '.doc', '.docx', '.xls', '.xlsx'))]
+                    if len(fnames) > len(cached_atts):
+                        requires_extract = True
+                elif att_field_val == "[BINARY]" and not cached_atts:
+                    requires_extract = True
+                    
+                if requires_extract:
+                    try:
+                        attachments = self._extract_attachments(dao_db, target_table, no_urut, conf, cached_atts)
+                    except Exception as e:
+                        import traceback
+                        logging.error(f"Failed extracting atts for {no_urut}: {e}\n{traceback.format_exc()}")
+                        attachments = cached_atts
+                else:
                     attachments = cached_atts
             else:
                 attachments = cached_atts
@@ -534,11 +573,22 @@ class BridgeLogic:
                                 if os.path.exists(path):
                                     try: os.remove(path)
                                     except: pass
-                                child_rs.Fields("FileData").SaveToFile(path)
+                                
+                                import logging
+                                logging.info(f"    [ATT] Extracting to: {path}")
+                                try:
+                                    child_rs.Fields("FileData").SaveToFile(path)
+                                    logging.info(f"    [ATT] SaveToFile executed. Exists? {os.path.exists(path)}")
+                                except Exception as e:
+                                    logging.error(f"    [ATT] SaveToFile Failed! {e}")
+                                
                                 if os.path.exists(path):
+                                    logging.info(f"    [ATT] Uploading to Drive: {smart_name}")
                                     res = self._upload_to_drive(path, smart_name, conf['drive_folder_id'])
                                     if res:
                                         results.append({'fileName': fname, 'driveViewLink': res['link'], 'driveFileId': res['id']})
+                                    else:
+                                        logging.error(f"    [ATT] _upload_to_drive returned None for: {smart_name}")
                                     try: os.remove(path)
                                     except: pass
                         child_rs.MoveNext()
@@ -556,19 +606,49 @@ class BridgeLogic:
 
             if rs: rs.Close()
         except Exception as e: 
-            pass
+            import logging
+            logging.error(f"Attachment Extraction Error for {no_urut}: {e}")
         return results
 
     def _check_drive_file(self, name, folder_id):
+        """Cari file di Drive. Coba exact match dulu, lalu contains, lalu tanpa folder filter."""
         if not self.drive_service: return None
         try:
             safe_name = name.replace("'", "\\'")
+
+            # 1) Exact match (case-sensitive) di folder yang ditentukan
+            q = f"name = '{safe_name}' and trashed = false"
+            if folder_id: q += f" and '{folder_id}' in parents"
+            res = self.drive_service.files().list(q=q, fields="files(id, name)").execute()
+            files = res.get('files', [])
+            if files:
+                logging.info(f"[DRIVE] Exact match found: '{name}'")
+                return files[0]
+
+            # 2) Contains match di folder (case-insensitive, lebih toleran)
             q = f"name contains '{safe_name}' and trashed = false"
             if folder_id: q += f" and '{folder_id}' in parents"
-            res = self.drive_service.files().list(q=q, fields="files(id)").execute()
+            # Increased page size to prevent missing matches among many files
+            res = self.drive_service.files().list(q=q, fields="files(id, name)", pageSize=100).execute()
             files = res.get('files', [])
-            return files[0] if files else None
-        except: return None
+            if files:
+                logging.info(f"[DRIVE] Contains match found: '{name}' -> '{files[0].get('name')}'")
+                return files[0]
+
+            # 3) Fallback: exact match tanpa filter folder (jaga-jaga salah folder ID)
+            if folder_id:
+                q = f"name = '{safe_name}' and trashed = false"
+                res = self.drive_service.files().list(q=q, fields="files(id, name)").execute()
+                files = res.get('files', [])
+                if files:
+                    logging.warning(f"[DRIVE] Found '{name}' outside target folder — check drive_folder_id config!")
+                    return files[0]
+
+            logging.info(f"[DRIVE] File NOT found: '{name}'")
+            return None
+        except Exception as e:
+            logging.warning(f"[DRIVE] _check_drive_file error for '{name}': {e}")
+            return None
 
     def _upload_to_drive(self, path, name, folder_id):
         if not self.drive_service: return None
@@ -579,8 +659,11 @@ class BridgeLogic:
             f = self.drive_service.files().create(body=meta, media_body=media, fields='id').execute()
             fid = f.get('id')
             self.drive_service.permissions().create(fileId=fid, body={'type': 'anyone', 'role': 'reader'}).execute()
+            logging.info(f"[DRIVE] Upload Success: {name} -> {fid}")
             return {'id': fid, 'link': f"https://drive.google.com/file/d/{fid}/view?usp=sharing"}
-        except: return None
+        except Exception as e:
+            logging.error(f"[DRIVE] Upload Failed for {name}: {e}")
+            return None
 
     def _upload_simple_file(self, path, name, conf):
         if not self.drive_service: return None, None

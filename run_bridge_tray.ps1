@@ -1,4 +1,4 @@
-﻿[void] [System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms")
+[void] [System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms")
 [void] [System.Reflection.Assembly]::LoadWithPartialName("System.Drawing")
 
 Add-Type -MemberDefinition '
@@ -29,13 +29,21 @@ $global:currentBridgeProcess = $null
 # pythonw.exe is headless (no window title or handle).
 # ---------------------------------------------------------
 function Test-BridgeRunning {
-    # Check for node running the bridge script
-    $procs = Get-Process -Name "node" -ErrorAction SilentlyContinue
+    # Check for pythonw running bridge_tray.py (the actual Python bridge)
+    $procs = Get-Process -Name "pythonw" -ErrorAction SilentlyContinue
     foreach ($p in $procs) {
         try {
-            # Get Command Line via WMI
             $cmdline = (Get-WmiObject Win32_Process -Filter "ProcessId=$($p.Id)").CommandLine
-            if ($cmdline -match "index\.js") { return $true }
+            if ($cmdline -match "bridge_tray\.py") { return $true }
+        }
+        catch {}
+    }
+    # Fallback: also check regular python.exe in case it was started that way
+    $procs2 = Get-Process -Name "python" -ErrorAction SilentlyContinue
+    foreach ($p in $procs2) {
+        try {
+            $cmdline = (Get-WmiObject Win32_Process -Filter "ProcessId=$($p.Id)").CommandLine
+            if ($cmdline -match "bridge_tray\.py") { return $true }
         }
         catch {}
     }
@@ -161,7 +169,13 @@ $menuItemExit.add_Click({
             }
             # Cleanup any stragglers by title
             Get-Process | Where-Object { $_.MainWindowTitle -match $UNIQUE_TITLE } | Stop-Process -Force -ErrorAction SilentlyContinue
-            Stop-Process -Name "node" -Force -ErrorAction SilentlyContinue 
+            # Kill pythonw bridge processes
+            Get-Process -Name "pythonw" -ErrorAction SilentlyContinue | ForEach-Object {
+                try {
+                    $cmdline = (Get-WmiObject Win32_Process -Filter "ProcessId=$($_.Id)").CommandLine
+                    if ($cmdline -match "bridge_tray\.py") { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
+                } catch {}
+            }
         
             $mutex.ReleaseMutex()
             $mutex.Dispose()

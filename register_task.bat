@@ -3,10 +3,9 @@ setlocal
 
 :: --- CONFIGURATION ---
 set "TASK_NAME=MailTrackerPro_Bridge_Tray"
-:: Use Python 3.13 specifically via py launcher to ensure dependencies match
-set "PYTHON_EXE=py"
-set "ARGS=-3.13 -w"
+set "PYTHON_EXE=%~dp0.venv\Scripts\pythonw.exe"
 set "SCRIPT_PATH=%~dp0bridge\bridge_tray.py"
+set "START_IN=%~dp0"
 
 :: Check if script exists
 if not exist "%SCRIPT_PATH%" (
@@ -15,10 +14,9 @@ if not exist "%SCRIPT_PATH%" (
     exit /b 1
 )
 
-:: Verify py launcher exists
-where py >nul 2>nul
-if %ERRORLEVEL% NEQ 0 (
-    echo [ERROR] Python Launcher 'py' not found. Please install Python for Windows.
+:: Verify python exists in venv
+if not exist "%PYTHON_EXE%" (
+    echo [ERROR] Virtual environment Python not found. Please setup the environment first.
     pause
     exit /b 1
 )
@@ -28,16 +26,17 @@ echo   REGISTERING TASK SCHEDULER: %TASK_NAME%
 echo ===================================================
 echo.
 echo Script Path: %SCRIPT_PATH%
-echo Target: Python 3.13 (via py launcher)
+echo Target: Virtual Environment Python (%PYTHON_EXE%)
+echo Working Directory: %START_IN%
 echo.
 
 :: Create the Task
 :: /SC ONLOGON - Run at user logon
 :: /TR - The command to run.
 :: /F - Force overwrite if exists
-:: Command structure: py -3.13 -w "Path\To\Script.py"
 
-schtasks /Create /F /SC ONLOGON /TN "%TASK_NAME%" /TR "\"%PYTHON_EXE%\" %ARGS% \"%SCRIPT_PATH%\""
+schtasks /Create /F /SC ONLOGON /TN "%TASK_NAME%" /TR "\"%PYTHON_EXE%\" \"%SCRIPT_PATH%\"" /V1
+:: Trying to set delayed start or start-in folder usually requires XML or PS, but a simple Logon works for pythonw.
 
 if %ERRORLEVEL% EQU 0 (
     echo.
