@@ -47,7 +47,9 @@ const nextConfig = {
         return config;
     },
 
-
+    // 5. Turbopack fallback config
+    // Silence Turbopack warning when a custom webpack config is present
+    turbopack: {},
 };
 
 module.exports = nextConfig;
